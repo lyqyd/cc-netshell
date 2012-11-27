@@ -19,6 +19,7 @@ local packetConversion = {
 	textColor = "TF",
 	textBackground = "TK",
 	textIsColor = "TA",
+	event = "EV",
 	SQ = "query",
 	SR = "response",
 	SP = "data",
@@ -35,6 +36,7 @@ local packetConversion = {
 	TF = "textColor",
 	TK = "textBackground",
 	TA = "textIsColor",
+	EV = "event",
 }
 
 local function openModem()
@@ -205,24 +207,12 @@ if #tArgs == 1 and tArgs[1] == "host" then
 				packetType = packetConversion[string.sub(event[3], 1, 2)]
 				message = string.match(event[3], ";(.*)")
 				if connections[conn] and connections[conn].status == "open" then
-					if packetType == "data" or string.sub(packetType, 1, 4) == "text" then
+					if packetType == "event" or string.sub(packetType, 1, 4) == "text" then
 						local eventTable = {}
-						if packetType == "data" then
-							for match, typeCode in string.gmatch(message, "(.-);([^;])") do
-								if typeCode == "n" then
-									table.insert(eventTable, tonumber(match))
-								elseif typeCode == "b" then
-									if match == "true" then
-										table.insert(eventTable, true)
-									else
-										table.insert(eventTable, false)
-									end
-								else
-									table.insert(eventTable, match)
-								end
-							end
+						if packetType == "event" then
+							eventTable = textutils.unserialize(message)
 						else
-							--we can pass the packet in raw, since this is non-lyqydnet.
+							--we can pass the packet in raw, since this is not an event packet.
 							eventTable = event
 						end
 						if not connections[conn].filter or eventTable[1] == connections[conn].filter then
@@ -344,11 +334,7 @@ elseif #tArgs == 1 then
 			end
 		elseif event[1] == "mouse_click" or event[1] == "mouse_drag" or event[1] == "mouse_scroll" or event[1] == "key" or event[1] == "char" then
 			--pack up event
-			local eventString = ""
-			for i=1, #event do
-				eventString = eventString..tostring(event[i])..";"..string.sub(type(event[i]), 1, 1)
-			end
-			send(serverNum, "data", eventString)
+			send(serverNum, "event", textutils.serialize(event))
 		end
 	end
 else
