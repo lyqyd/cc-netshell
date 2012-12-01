@@ -184,15 +184,19 @@ local function textRedirect (id)
 end
 
 local function newSession()
-	local sessionThread = coroutine.create(function() shell.run("/rom/programs/shell") end)
+	local path = "/rom/programs/shell"
+	if #tArgs >= 2 and shell.resolveProgram(tArgs[2]) then path = shell.resolveProgram(tArgs[2]) end
+	local sessionThread = coroutine.create(function() shell.run(path) end)
 	return sessionThread
 end
 
-if #tArgs == 1 and tArgs[1] == "host" then
+if #tArgs >= 1 and tArgs[1] == "host" then
 	if not openModem() then return end
 	local connInfo = {}
 	connInfo.target = term.native
-	connInfo.thread = newSession()
+	local path = "/rom/programs/shell"
+	if #tArgs >= 3 and shell.resolveProgram(tArgs[3]) then path = shell.resolveProgram(tArgs[3]) end
+	connInfo.thread = coroutine.create(function() shell.run(path) end)
 	connections.localShell = connInfo
 	term.clear()
 	term.setCursorPos(1,1)
