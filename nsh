@@ -258,7 +258,7 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 					connInfo.target = textRedirect(conn)
 					connInfo.thread = newSession()
 					send(conn, "response", "OK")
-					table.insert(connections, conn, connInfo)
+					connections[conn] = connInfo
 					term.redirect(connInfo.target)
 					coroutine.resume(connInfo.thread)
 					term.restore()
