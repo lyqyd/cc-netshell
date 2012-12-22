@@ -249,8 +249,18 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 						--error
 					end
 				elseif packetType ~= "query" then
-					send(conn, "close", "disconnect")
-					--client thinks connection is open, but server thinks it isn't.
+					--usually, we would send a disconnect here, but this prevents one from hosting nsh and connecting to other computers.  Pass these to all shells as well.
+					for cNum, cInfo in pairs(connections) do
+						if not cInfo.filter or event[1] == cInfo.filter then
+							cInfo.filter = nil
+							term.redirect(cInfo.target)
+							passback = {coroutine.resume(cInfo.thread, unpack(event))}
+							if passback[2] then
+								cInfo.filter = passback[2]
+							end
+							term.restore()
+						end
+					end
 				else
 					--open new connection
 					local connInfo = {}
