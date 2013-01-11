@@ -2,11 +2,59 @@ local tArgs = { ... }
 
 local connections = {}
 
+local nshAPI = {
+	connList = connections
+}
+
+nshAPI.getRemoteID = function()
+	--if we are a client, return server ID.
+	if nshAPI.serverNum then return nshAPI.serverNum end
+	--otherwise, check for connected clients with matching threads.
+	for cNum, cInfo in pairs(nshAPI.connList) do
+		if cInfo.thread == coroutine.running() then
+			return cNum
+		end
+	end
+	return nil
+end
+
+nshAPI.send = function(msg)
+	local id = nshAPI.getRemoteID()
+	if id then
+		return rednet.send(id, msg)
+	end
+	return nil
+end
+
+nshAPI.receive = function(timeout)
+	if type(timeout) == number then timeout = os.startTimer(timeout) end
+	while true do
+		event = {os.pullEvent()}
+		if event[1] == "rednet_message" and event[2] == nshAPI.getRemoteID() then
+			return event[3]
+		elseif event[1] == "timer" and event[2] == timeout then
+			return nil
+		end
+	end
+end
+
+nshAPI.getClientCapabilities = function()
+	if nshAPI.clientCapabilities then return nshAPI.clientCapabilities end
+	nshAPI.send("SP:;clientCapabilities")
+	return nshAPI.receive(1)
+end
+
 local packetConversion = {
 	query = "SQ",
 	response = "SR",
 	data = "SP",
 	close = "SC",
+	fileQuery = "FQ",
+	fileSend = "FS",
+	fileResponse = "FR",
+	fileHeader = "FH",
+	fileData = "FD",
+	fileEnd = "FE",
 	textWrite = "TW",
 	textCursorPos = "TC",
 	textGetCursorPos = "TG",
@@ -24,6 +72,12 @@ local packetConversion = {
 	SR = "response",
 	SP = "data",
 	SC = "close",
+	FQ = "fileQuery",
+	FS = "fileSend",
+	FR = "fileResponse",
+	FH = "fileHeader",
+	FD = "fileData",
+	FE = "fileEnd",
 	TW = "textWrite",
 	TC = "textCursorPos",
 	TG = "textGetCursorPos",
@@ -191,6 +245,7 @@ local function newSession()
 end
 
 if #tArgs >= 1 and tArgs[1] == "host" then
+	_G.nsh = nshAPI
 	if not openModem() then return end
 	local connInfo = {}
 	connInfo.target = term.native
@@ -246,7 +301,20 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 						send(conn, "close", "disconnect")
 						--close connection
 					else
-						--error
+						--we got a packet, have an open connection, but despite it being in the conversion table, don't handle it ourselves. Send it onward.
+						if not connections[conn].filter or eventTable[1] == connections[conn].filter then
+							connections[conn].filter = nil
+							term.redirect(connections[conn].target)
+							passback = {coroutine.resume(connections[conn].thread, unpack(event))}
+							if coroutine.status(connections[conn].thread) == "dead" then
+								send(conn, "close", "disconnect")
+								table.remove(connections, conn)
+							end
+							if passback[2] then
+								connections[conn].filter = passback[2]
+							end
+							term.restore()
+						end
 					end
 				elseif packetType ~= "query" then
 					--usually, we would send a disconnect here, but this prevents one from hosting nsh and connecting to other computers.  Pass these to all shells as well.
@@ -315,6 +383,8 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 	end
 
 elseif #tArgs == 1 then
+	local fileTransferState = nil
+	local fileData = nil
 	if not openModem() then return end
 	local serverNum = tonumber(tArgs[1])
 	send(serverNum, "query", "connect")
@@ -323,18 +393,63 @@ elseif #tArgs == 1 then
 		print("Connection Failed")
 		return
 	else
+		nshAPI.serverNum = serverNum
+		nshAPI.clientCapabilities = "-fileTransfer-extensions-"
 		term.clear()
 		term.setCursorPos(1,1)
 	end
 
 	while true do
 		event = {os.pullEvent()}
-		if event[1] == "rednet_message" then
+		if event[1] == "rednet_message" and event[2] == serverNum then
 			if packetConversion[string.sub(event[3], 1, 2)] then
 				packetType = packetConversion[string.sub(event[3], 1, 2)]
 				message = string.match(event[3], ";(.*)")
 				if string.sub(packetType, 1, 4) == "text" then
 					processText(serverNum, packetType, message)
+				elseif pacektType == "data" then
+					if message == "clientCapabilities" then
+						rednet.send(serverNum, nshAPI.clientCapabilities)
+					end
+				elseif packetType == "fileQuery" then
+					--send a file to the server
+					if fs.exists(message) then
+						send(serverNum, "fileHeader", message)
+						local file = io.open(message, "r")
+						if file then
+							send(serverNum, "fileData", file:read("*a"))
+							file:close()
+						end
+					else
+						send(serverNum, "fileHeader", "fileNotFound")
+					end
+					send(serverNum, "fileEnd", "end")
+				elseif packetType == "fileSend" then
+					--receive a file from the server, but don't overwrite existing files.
+					if not fs.exists(message) then
+						fileTransferState = "receive_wait:"..message
+						send(serverNum, "fileResponse", "ok")
+						fileData = ""
+					else
+						send(serverNum, "fileResponse", "reject")
+					end
+				elseif packetType == "fileHeader" then
+					if message == "fileNotFound" then
+						fileTransferState = nil
+					end
+				elseif packetType == "fileData" then
+					if fileTransferState and string.match(fileTransferState, "(.-):") == "receive_wait" then
+						fileData = fileData..message
+					end
+				elseif packetType == "fileEnd" then
+					if fileTransferState and string.match(fileTransferState, "(.-):") == "receive_wait" then
+						local file = io.open(string.match(fileTransferState, ":(.*)"), "w")
+						if file then
+							file:write(fileData)
+							file:close()
+						end
+						fileTransferState = nil
+					end
 				elseif packetType == "close" then
 					if term.isColor() then
 						term.setBackgroundColor(colors.black)
@@ -343,6 +458,7 @@ elseif #tArgs == 1 then
 					term.clear()
 					term.setCursorPos(1, 1)
 					print("Connection closed by server.")
+					nshAPI.serverNum = nil
 					return
 				end
 			end
