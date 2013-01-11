@@ -258,7 +258,7 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 	coroutine.resume(connections.localShell.thread)
 
 	while true do
-		event = {os.pullEvent()}
+		event = {os.pullEventRaw()}
 		if event[1] == "rednet_message" then
 			if packetConversion[string.sub(event[3], 1, 2)] then
 				--this is a packet meant for us.
@@ -366,6 +366,9 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 				end
 				return
 			end
+		elseif event[1] == "terminate" then
+			_G.nsh = nil
+			return
 		else
 			--dispatch all other events to all shells
 			for cNum, cInfo in pairs(connections) do
