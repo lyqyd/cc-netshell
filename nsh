@@ -353,5 +353,5 @@ elseif #tArgs == 1 then
 	end
 else
 	print("Usage: nsh <serverID>")
-	print("       nsh host")
+	print("       nsh host [remote [local]]")
 end
