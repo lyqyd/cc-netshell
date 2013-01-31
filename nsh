@@ -278,12 +278,12 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 							connections[conn].filter = nil
 							term.redirect(connections[conn].target)
 							passback = {coroutine.resume(connections[conn].thread, unpack(eventTable))}
+							if passback[2] then
+								connections[conn].filter = passback[2]
+							end
 							if coroutine.status(connections[conn].thread) == "dead" then
 								send(conn, "close", "disconnect")
 								table.remove(connections, conn)
-							end
-							if passback[2] then
-								connections[conn].filter = passback[2]
 							end
 							term.restore()
 						end
@@ -306,12 +306,12 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 							connections[conn].filter = nil
 							term.redirect(connections[conn].target)
 							passback = {coroutine.resume(connections[conn].thread, unpack(event))}
+							if passback[2] then
+								connections[conn].filter = passback[2]
+							end
 							if coroutine.status(connections[conn].thread) == "dead" then
 								send(conn, "close", "disconnect")
 								table.remove(connections, conn)
-							end
-							if passback[2] then
-								connections[conn].filter = passback[2]
 							end
 							term.restore()
 						end
