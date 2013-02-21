@@ -184,13 +184,12 @@ local function textRedirect (id)
 		return send(textTable.id, "textClearLine", "nil")
 	end
 	textTable.getCursorPos = function()
-		if send(textTable.id, "textGetCursorPos", "nil") then
-			local pType, message = awaitResponse(textTable.id, 2)
-			if pType and pType == "textInfo" then
-				local x, y = string.match(message, "(%d+),(%d+)")
-				return tonumber(x), tonumber(y)
-			end
-		else return false end
+		send(textTable.id, "textGetCursorPos", "nil")
+		local pType, message = awaitResponse(textTable.id, 2)
+		if pType and pType == "textInfo" then
+			local x, y = string.match(message, "(%d+),(%d+)")
+			return tonumber(x), tonumber(y)
+		end
 	end
 	textTable.setCursorPos = function(x, y)
 		return send(textTable.id, "textCursorPos", math.floor(x)..","..math.floor(y))
@@ -203,24 +202,22 @@ local function textRedirect (id)
 		end
 	end
 	textTable.getSize = function()
-		if send(textTable.id, "textGetSize", "nil") then
-			local pType, message = awaitResponse(textTable.id, 2)
-			if pType and pType == "textInfo" then
-				local x, y = string.match(message, "(%d+),(%d+)")
-				return tonumber(x), tonumber(y)
-			end
-		else return false end
+		send(textTable.id, "textGetSize", "nil")
+		local pType, message = awaitResponse(textTable.id, 2)
+		if pType and pType == "textInfo" then
+			local x, y = string.match(message, "(%d+),(%d+)")
+			return tonumber(x), tonumber(y)
+		end
 	end
 	textTable.scroll = function(lines)
 		return send(textTable.id, "textScroll", lines)
 	end
 	textTable.isColor = function()
-		if send(textTable.id, "textIsColor", "nil") then
-			local pType, message = awaitResponse(textTable.id, 2)
-			if pType and pType == "textInfo" then
-				if message == "true" then
-					return true
-				end
+		send(textTable.id, "textIsColor", "nil")
+		local pType, message = awaitResponse(textTable.id, 2)
+		if pType and pType == "textInfo" then
+			if message == "true" then
+				return true
 			end
 		end
 		return false
@@ -278,7 +275,7 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 							connections[conn].filter = nil
 							term.redirect(connections[conn].target)
 							passback = {coroutine.resume(connections[conn].thread, unpack(eventTable))}
-							if passback[2] then
+							if passback[1] and passback[2] then
 								connections[conn].filter = passback[2]
 							end
 							if coroutine.status(connections[conn].thread) == "dead" then
@@ -410,7 +407,7 @@ elseif #tArgs == 1 then
 				message = string.match(event[3], ";(.*)")
 				if string.sub(packetType, 1, 4) == "text" then
 					processText(serverNum, packetType, message)
-				elseif pacektType == "data" then
+				elseif packetType == "data" then
 					if message == "clientCapabilities" then
 						rednet.send(serverNum, nshAPI.clientCapabilities)
 					end
