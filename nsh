@@ -253,6 +253,14 @@ local function textRedirect (id)
 	return textTable
 end
 
+local eventFilter = {
+	key = true,
+	char = true,
+	mouse_click = true,
+	mouse_drag = true,
+	mouse_scroll = true,
+}
+
 local function newSession()
 	local path = "/rom/programs/shell"
 	if #tArgs >= 2 and shell.resolveProgram(tArgs[2]) then path = shell.resolveProgram(tArgs[2]) end
