@@ -52,6 +52,17 @@ nshAPI.getClientCapabilities = function()
 	return nshAPI.receive(1)
 end
 
+nshAPI.getRemoteConnections = function()
+	local remotes = {}
+	for cNum, cInfo in pairs(nshAPI.connList) do
+		table.insert(remotes, cNum)
+		if cInfo.outbound then
+			table.insert(remotes, cInfo.outbound)
+		end
+	end
+	return remotes
+end
+
 local packetConversion = {
 	query = "SQ",
 	response = "SR",
