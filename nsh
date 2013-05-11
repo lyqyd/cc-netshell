@@ -409,10 +409,18 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 		end
 	end
 
-elseif #tArgs == 1 then
+elseif #tArgs == 1 and nsh and nsh.getRemoteID() then
+	print(nsh.getRemoteID())
+	--forwarding mode
+	local conns = nsh.getRemoteConnections()
+	for i = 1, #conns do
+		if conns[i] == serverNum then
+			print("Cyclic connection refused.")
+			return
+		end
+	end
 	local fileTransferState = nil
 	local fileData = nil
-	if not openModem() then return end
 	local serverNum = tonumber(tArgs[1])
 	send(serverNum, "query", "connect")
 	local pType, message = awaitResponse(serverNum, 2)
@@ -420,6 +428,50 @@ elseif #tArgs == 1 then
 		print("Connection Failed")
 		return
 	else
+		nsh.connList[nsh.getRemoteID()].outbound = serverNum
+		term.clear()
+		term.setCursorPos(1,1)
+	end
+	local clientID = nsh.getRemoteID()
+	local serverID = tonumber(tArgs[1])
+	while true do
+		event = {os.pullEvent()}
+		if event[1] == "rednet_message" then
+			if event[2] == clientID or event[2] == serverID then
+				if event[2] == serverID and string.sub(event[3], 1, 2) == "SC" then break end
+				rednet.send((event[2] == clientID and serverID or clientID), event[3])
+			end
+		elseif eventFilter[event[1]] then
+			rednet.send(serverID, "EV:;"..textutils.serialize(event))
+		end
+	end
+	nsh.connList[nsh.getRemoteID()].outbound = nil
+	term.clear()
+	term.setCursorPos(1, 1)
+	print("Connection closed by server")
+
+elseif #tArgs == 1 then --either no server running or we are the local shell on the server.
+	local serverNum = tonumber(tArgs[1])
+	if nsh then
+		local conns = nsh.getRemoteConnections()
+		for i = 1, #conns do
+			if conns[i] == serverNum then
+				print("Connection refused.")
+				return
+			end
+		end
+	end
+	local fileTransferState = nil
+	local fileData = nil
+	if not openModem() then return end
+	send(serverNum, "query", "connect")
+	local pType, message = awaitResponse(serverNum, 2)
+	if pType ~= "response" then
+		print("Connection failed.")
+		return
+	else
+		if nsh then nshAPI = nsh end
+		if nshAPI.connList and nshAPI.connList.localShell then nshAPI.connList.localShell.outbound = serverNum end
 		nshAPI.serverNum = serverNum
 		nshAPI.clientCapabilities = "-fileTransfer-extensions-"
 		term.clear()
