@@ -479,7 +479,7 @@ elseif #tArgs == 1 then --either no server running or we are the local shell on 
 	end
 
 	while true do
-		event = {os.pullEvent()}
+		event = {os.pullEventRaw()}
 		if event[1] == "rednet_message" and event[2] == serverNum then
 			if packetConversion[string.sub(event[3], 1, 2)] then
 				packetType = packetConversion[string.sub(event[3], 1, 2)]
@@ -538,12 +538,17 @@ elseif #tArgs == 1 then --either no server running or we are the local shell on 
 					term.setCursorPos(1, 1)
 					print("Connection closed by server.")
 					nshAPI.serverNum = nil
+					if nshAPI.connList and nshAPI.connList.localShell then nshAPI.connList.localShell.outbound = nil end
 					return
 				end
 			end
 		elseif event[1] == "mouse_click" or event[1] == "mouse_drag" or event[1] == "mouse_scroll" or event[1] == "key" or event[1] == "char" then
 			--pack up event
 			send(serverNum, "event", textutils.serialize(event))
+		elseif event[1] == "terminate" then
+			nshAPI.serverNum = nil
+			if nshAPI.localShell then nshAPI.localShell.outbound = nil end
+			return
 		end
 	end
 else
