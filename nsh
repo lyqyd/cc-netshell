@@ -7,14 +7,22 @@ local nshAPI = {
 }
 
 nshAPI.getRemoteID = function()
-	--if we are a client, return server ID.
-	if nshAPI.serverNum then return nshAPI.serverNum end
-	--otherwise, check for connected clients with matching threads.
+	--check for connected clients with matching threads.
 	for cNum, cInfo in pairs(nshAPI.connList) do
 		if cInfo.thread == coroutine.running() then
+			if cNum == "localShell" then
+				--if we are a client running on the server, return the remote server ID.
+				if nshAPI.serverNum then
+					return nshAPI.serverNum
+				else
+					return nil
+				end
+			end
 			return cNum
 		end
 	end
+	--client running without local server, return remote server ID.
+	if nshAPI.serverNum then return nshAPI.serverNum end
 	return nil
 end
 
