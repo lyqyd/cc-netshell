@@ -161,7 +161,7 @@ local function processText(conn, pType, value)
 		local x, y = term.getCursorPos()
 		send(conn, "textInfo", math.floor(x)..","..math.floor(y))
 	elseif pType == "textCursorPos" then
-		local x, y = string.match(value, "(%d+),(%d+)")
+		local x, y = string.match(value, "(%-?%d+),(%-?%d+)")
 		term.setCursorPos(tonumber(x), tonumber(y))
 	elseif pType == "textBlink" then
 		if value == "true" then
@@ -206,7 +206,7 @@ local function textRedirect (id)
 		send(textTable.id, "textGetCursorPos", "nil")
 		local pType, message = awaitResponse(textTable.id, 2)
 		if pType and pType == "textInfo" then
-			local x, y = string.match(message, "(%d+),(%d+)")
+			local x, y = string.match(message, "(%-?%d+),(%-?%d+)")
 			return tonumber(x), tonumber(y)
 		end
 	end
