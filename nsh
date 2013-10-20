@@ -418,7 +418,7 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 						end
 					elseif packetType == "query" then
 						local connType, color, x, y = string.match(message, "(%a+):(%a+);(%d+),(%d+)")
-						if connType == "connect" then
+						if connType == "connect" or (connType == "resume" and (not framebuffer)) then
 							--reset connection
 							send(conn, "response", "OK")
 							connections[conn] = newSession(conn, tonumber(x), tonumber(y), color == "true")
