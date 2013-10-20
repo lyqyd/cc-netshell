@@ -6,7 +6,7 @@ local nshAPI = {
 	connList = connections
 }
 
-if not framebuffer then if not (os.loadAPI("framebuffer") or os.loadAPI("LyqydOS/framebuffer")) then error("Could not find framebuffer API!", 0) end end
+if not framebuffer then if not (os.loadAPI("framebuffer") or os.loadAPI("LyqydOS/framebuffer")) then print("Couldn't find framebuffer API, using fallback") end end
 
 nshAPI.getRemoteID = function()
 	--check for connected clients with matching threads.
@@ -141,6 +141,18 @@ local packetConversion = {
 	fileHeader = "FH",
 	fileData = "FD",
 	fileEnd = "FE",
+	textWrite = "TW",
+	textCursorPos = "TC",
+	textGetCursorPos = "TG",
+	textGetSize = "TD",
+	textInfo = "TI",
+	textClear = "TE",
+	textClearLine = "TL",
+	textScroll = "TS",
+	textBlink = "TB",
+	textColor = "TF",
+	textBackground = "TK",
+	textIsColor = "TA",
 	textTable = "TT",
 	event = "EV",
 	SQ = "query",
@@ -153,6 +165,18 @@ local packetConversion = {
 	FH = "fileHeader",
 	FD = "fileData",
 	FE = "fileEnd",
+	TW = "textWrite",
+	TC = "textCursorPos",
+	TG = "textGetCursorPos",
+	TD = "textGetSize",
+	TI = "textInfo",
+	TE = "textClear",
+	TL = "textClearLine",
+	TS = "textScroll",
+	TB = "textBlink",
+	TF = "textColor",
+	TK = "textBackground",
+	TA = "textIsColor",
 	TT = "textTable",
 	EV = "event",
 }
@@ -196,8 +220,44 @@ local function awaitResponse(id, time)
 	return packetType, message
 end
 
-local function processText(serverNum, pType, value)
-	if pType == "textTable" then
+local function processText(conn, pType, value)
+	if not pType then return false end
+	if pType == "textWrite" and value then
+		term.write(value)
+	elseif pType == "textClear" then
+		term.clear()
+	elseif pType == "textClearLine" then
+		term.clearLine()
+	elseif pType == "textGetCursorPos" then
+		local x, y = term.getCursorPos()
+		send(conn, "textInfo", math.floor(x)..","..math.floor(y))
+	elseif pType == "textCursorPos" then
+		local x, y = string.match(value, "(%-?%d+),(%-?%d+)")
+		term.setCursorPos(tonumber(x), tonumber(y))
+	elseif pType == "textBlink" then
+		if value == "true" then
+			term.setCursorBlink(true)
+		else
+			term.setCursorBlink(false)
+		end
+	elseif pType == "textGetSize" then
+		x, y = term.getSize()
+		send(conn, "textInfo", x..","..y)
+	elseif pType == "textScroll" and value then
+		term.scroll(tonumber(value))
+	elseif pType == "textIsColor" then
+		send(conn, "textInfo", tostring(term.isColor()))
+	elseif pType == "textColor" and value then
+		value = tonumber(value)
+		if (value == 1 or value == 32768) or term.isColor() then
+			term.setTextColor(value)
+		end
+	elseif pType == "textBackground" and value then
+		value = tonumber(value)
+		if (value == 1 or value == 32768) or term.isColor() then
+			term.setBackgroundColor(value)
+		end
+	elseif pType == "textTable" then
 		local linesTable = textutils.unserialize(value)
 		for i=1, linesTable.sizeY do
 			term.setCursorPos(1,i)
@@ -216,8 +276,71 @@ local function processText(serverNum, pType, value)
 		term.setCursorPos(linesTable.cursorX, linesTable.cursorY)
 		term.setCursorBlink(linesTable.cursorBlink)
 	end
+	return
 end
 
+local function textRedirect(id)
+	local textTable = {}
+	textTable.id = id
+	textTable.write = function(text)
+		return send(textTable.id, "textWrite", text)
+	end
+	textTable.clear = function()
+		return send(textTable.id, "textClear", "nil")
+	end
+	textTable.clearLine = function()
+		return send(textTable.id, "textClearLine", "nil")
+	end
+	textTable.getCursorPos = function()
+		send(textTable.id, "textGetCursorPos", "nil")
+		local pType, message = awaitResponse(textTable.id, 2)
+		if pType and pType == "textInfo" then
+			local x, y = string.match(message, "(%-?%d+),(%-?%d+)")
+			return tonumber(x), tonumber(y)
+		end
+	end
+	textTable.setCursorPos = function(x, y)
+		return send(textTable.id, "textCursorPos", math.floor(x)..","..math.floor(y))
+	end
+	textTable.setCursorBlink = function(b)
+		if b then
+			return send(textTable.id, "textBlink", "true")
+		else
+			return send(textTable.id, "textBlink", "false")
+		end
+	end
+	textTable.getSize = function()
+		send(textTable.id, "textGetSize", "nil")
+		local pType, message = awaitResponse(textTable.id, 2)
+		if pType and pType == "textInfo" then
+			local x, y = string.match(message, "(%d+),(%d+)")
+			return tonumber(x), tonumber(y)
+		end
+	end
+	textTable.scroll = function(lines)
+		return send(textTable.id, "textScroll", lines)
+	end
+	textTable.isColor = function()
+		send(textTable.id, "textIsColor", "nil")
+		local pType, message = awaitResponse(textTable.id, 2)
+		if pType and pType == "textInfo" then
+			if message == "true" then
+				return true
+			end
+		end
+		return false
+	end
+	textTable.isColour = textTable.isColor
+	textTable.setTextColor = function(color)
+		return send(textTable.id, "textColor", tostring(color))
+	end
+	textTable.setTextColour = textTable.setTextColor
+	textTable.setBackgroundColor = function(color)
+		return send(textTable.id, "textBackground", tostring(color))
+	end
+	textTable.setBackgroundColour = textTable.setBackgroundColor
+	return textTable
+end
 
 local eventFilter = {
 	key = true,
@@ -227,16 +350,23 @@ local eventFilter = {
 	mouse_scroll = true,
 }
 
-local function newSession(x, y, color)
+local function newSession(conn, x, y, color)
 	local session = {}
 	local path = "/rom/programs/shell"
 	if #tArgs >= 2 and shell.resolveProgram(tArgs[2]) then path = shell.resolveProgram(tArgs[2]) end
 	session.thread = coroutine.create(function() shell.run(path) end)
-	session.target = framebuffer.new(x, y, color)
+	if framebuffer then
+		session.target = framebuffer.new(x, y, color)
+	else
+		session.target = textRedirect(conn)
+	end
 	session.status = "open"
 	term.redirect(session.target)
 	coroutine.resume(session.thread)
 	term.restore()
+	if framebuffer then
+		send(conn, "textTable", textutils.serialize(session.target.buffer))
+	end
 	return session
 end
 
@@ -282,7 +412,7 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 								table.remove(connections, conn)
 							end
 							term.restore()
-							if connections[conn] then
+							if connections[conn] and framebuffer then
 								send(conn, "textTable", textutils.serialize(connections[conn].target.buffer))
 							end
 						end
@@ -291,8 +421,7 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 						if connType == "connect" then
 							--reset connection
 							send(conn, "response", "OK")
-							connections[conn] = newSession(tonumber(x), tonumber(y), color == "true")
-							send(conn, "textTable", textutils.serialize(connections[conn].target.buffer))
+							connections[conn] = newSession(conn, tonumber(x), tonumber(y), color == "true")
 						elseif connType == "resume" then
 							--restore connection
 							send(conn, "response", "OK")
@@ -316,7 +445,9 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 								table.remove(connections, conn)
 							end
 							term.restore()
-							send(conn, "textTable", textutils.serialize(connections[conn].target.buffer))
+							if framebuffer then
+								send(conn, "textTable", textutils.serialize(connections[conn].target.buffer))
+							end
 						end
 					end
 				elseif packetType ~= "query" then
@@ -330,7 +461,7 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 								cInfo.filter = passback[2]
 							end
 							term.restore()
-							if cNum ~= "localShell" then
+							if cNum ~= "localShell" and framebuffer then
 								send(cNum, "textTable", textutils.serialize(cInfo.target.buffer))
 							end
 						end
@@ -339,8 +470,7 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 					--open new connection
 					send(conn, "response", "OK")
 					local color, x, y = string.match(message, "connect:(%a+);(%d+),(%d+)")
-					local connInfo = newSession(tonumber(x), tonumber(y), color == "true")
-					send(conn, "textTable", textutils.serialize(connInfo.target.buffer))
+					local connInfo = newSession(conn, tonumber(x), tonumber(y), color == "true")
 					connections[conn] = connInfo
 				end
 			else
@@ -355,7 +485,7 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 						end
 						term.restore()
 					end
-					if cNum ~= "localShell" then
+					if cNum ~= "localShell" and framebuffer then
 						send(cNum, "textTable", textutils.serialize(cInfo.target.buffer))
 					end
 				end
@@ -385,7 +515,7 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 						cInfo.filter = passback[2]
 					end
 					term.restore()
-					if cNum ~= "localShell" then
+					if cNum ~= "localShell" and framebuffer then
 						send(cNum, "textTable", textutils.serialize(cInfo.target.buffer))
 					end
 				end
