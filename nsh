@@ -6,6 +6,8 @@ local nshAPI = {
 	connList = connections
 }
 
+if not framebuffer then if not (os.loadAPI("framebuffer") or os.loadAPI("LyqydOS/framebuffer")) then error("Could not find framebuffer API!", 0) end end
+
 nshAPI.getRemoteID = function()
 	--check for connected clients with matching threads.
 	for cNum, cInfo in pairs(nshAPI.connList) do
@@ -63,6 +65,71 @@ nshAPI.getRemoteConnections = function()
 	return remotes
 end
 
+nshAPI.packFile = function(path)
+	local data = {}
+	local count = 0
+	local handle = io.open(path, "rb")
+	if handle then
+		local byte = handle:read()
+		repeat
+			data[#data + 1] = byte
+			count = count + 1
+			if count % 1000 == 0 then
+				os.queueEvent("yield")
+				os.pullEvent("yield")
+			end
+			byte = handle:read()
+		until not byte
+		handle:close()
+	else
+		return false
+	end
+	local outputTable = {}
+	for i = 1, #data, 3 do
+		local num1, num2, num3 = data[i], data[i + 1] or 0, data[i + 2] or 0
+		table.insert(outputTable, string.char(bit.band(bit.brshift(num1, 2), 63)))
+		table.insert(outputTable, string.char(bit.bor(bit.band(bit.blshift(num1, 4), 48), bit.band(bit.brshift(num2, 4), 15))))
+		table.insert(outputTable, string.char(bit.bor(bit.band(bit.blshift(num2, 2), 60), bit.band(bit.brshift(num3, 6), 3))))
+		table.insert(outputTable, string.char(bit.band(num3, 63)))
+	end
+	--mark non-data (invalid) bytes
+	if #data % 3 == 1 then
+		outputTable[#outputTable] = "="
+		outputTable[#outputTable - 1] = "="
+	elseif #data % 3 == 2 then
+		outputTable[#outputTable] = "="
+	end
+	return table.concat(outputTable, "")
+end
+
+nshAPI.unpackAndSaveFile = function(path, data)
+	local outputTable = {}
+	for i=1, #data, 4 do
+		local char1, char2, char3, char4 = string.byte(string.sub(data, i, i)), string.byte(string.sub(data, i + 1, i + 1)), string.byte(string.sub(data, i + 2, i + 2)), string.byte(string.sub(data, i + 3, i + 3))
+		table.insert(outputTable, bit.band(bit.bor(bit.blshift(char1, 2), bit.brshift(char2, 4)), 255))
+		table.insert(outputTable, bit.band(bit.bor(bit.blshift(char2, 4), bit.brshift(char3, 2)), 255))
+		table.insert(outputTable, bit.band(bit.bor(bit.blshift(char3, 6), char4), 255))
+	end
+	--clean invalid bytes if marked
+	if string.sub(data, #data, #data) == "=" then
+		table.remove(outputTable)
+		if string.sub(data, #data - 1, #data - 1) == "=" then
+			table.remove(outputTable)
+		end
+	end
+	local handle = io.open(path, "wb")
+	if handle then
+		for i = 1, #outputTable do
+			handle:write(outputTable[i])
+			if i % 10 == 0 then
+				os.startTimer(0.1)
+				os.pullEvent("timer")
+			end
+		end
+		handle:close()
+	end
+end
+
 local packetConversion = {
 	query = "SQ",
 	response = "SR",
@@ -74,18 +141,7 @@ local packetConversion = {
 	fileHeader = "FH",
 	fileData = "FD",
 	fileEnd = "FE",
-	textWrite = "TW",
-	textCursorPos = "TC",
-	textGetCursorPos = "TG",
-	textGetSize = "TD",
-	textInfo = "TI",
-	textClear = "TE",
-	textClearLine = "TL",
-	textScroll = "TS",
-	textBlink = "TB",
-	textColor = "TF",
-	textBackground = "TK",
-	textIsColor = "TA",
+	textTable = "TT",
 	event = "EV",
 	SQ = "query",
 	SR = "response",
@@ -97,18 +153,7 @@ local packetConversion = {
 	FH = "fileHeader",
 	FD = "fileData",
 	FE = "fileEnd",
-	TW = "textWrite",
-	TC = "textCursorPos",
-	TG = "textGetCursorPos",
-	TD = "textGetSize",
-	TI = "textInfo",
-	TE = "textClear",
-	TL = "textClearLine",
-	TS = "textScroll",
-	TB = "textBlink",
-	TF = "textColor",
-	TK = "textBackground",
-	TA = "textIsColor",
+	TT = "textTable",
 	EV = "event",
 }
 
@@ -124,8 +169,10 @@ local function openModem()
 	return modemFound
 end
 
-local function send(id, type, message)
-	return rednet.send(id, packetConversion[type]..":;"..message)
+local function send(id, pType, message)
+	if pType and message then
+		return rednet.send(id, packetConversion[pType]..":;"..message)
+	end
 end
 
 local function awaitResponse(id, time)
@@ -149,109 +196,28 @@ local function awaitResponse(id, time)
 	return packetType, message
 end
 
-local function processText(conn, pType, value)
-	if not pType then return false end
-	if pType == "textWrite" and value then
-		term.write(value)
-	elseif pType == "textClear" then
-		term.clear()
-	elseif pType == "textClearLine" then
-		term.clearLine()
-	elseif pType == "textGetCursorPos" then
-		local x, y = term.getCursorPos()
-		send(conn, "textInfo", math.floor(x)..","..math.floor(y))
-	elseif pType == "textCursorPos" then
-		local x, y = string.match(value, "(%d+),(%d+)")
-		term.setCursorPos(tonumber(x), tonumber(y))
-	elseif pType == "textBlink" then
-		if value == "true" then
-			term.setCursorBlink(true)
-		else
-			term.setCursorBlink(false)
-		end
-	elseif pType == "textGetSize" then
-		x, y = term.getSize()
-		send(conn, "textInfo", x..","..y)
-	elseif pType == "textScroll" and value then
-		term.scroll(tonumber(value))
-	elseif pType == "textIsColor" then
-		send(conn, "textInfo", tostring(term.isColor()))
-	elseif pType == "textColor" and value then
-		value = tonumber(value)
-		if (value == 1 or value == 32768) or term.isColor() then
-			term.setTextColor(value)
-		end
-	elseif pType == "textBackground" and value then
-		value = tonumber(value)
-		if (value == 1 or value == 32768) or term.isColor() then
-			term.setBackgroundColor(value)
-		end
-	end
-	return
-end
-
-local function textRedirect (id)
-	local textTable = {}
-	textTable.id = id
-	textTable.write = function(text)
-		return send(textTable.id, "textWrite", text)
-	end
-	textTable.clear = function()
-		return send(textTable.id, "textClear", "nil")
-	end
-	textTable.clearLine = function()
-		return send(textTable.id, "textClearLine", "nil")
-	end
-	textTable.getCursorPos = function()
-		send(textTable.id, "textGetCursorPos", "nil")
-		local pType, message = awaitResponse(textTable.id, 2)
-		if pType and pType == "textInfo" then
-			local x, y = string.match(message, "(%d+),(%d+)")
-			return tonumber(x), tonumber(y)
-		end
-	end
-	textTable.setCursorPos = function(x, y)
-		return send(textTable.id, "textCursorPos", math.floor(x)..","..math.floor(y))
-	end
-	textTable.setCursorBlink = function(b)
-		if b then
-			return send(textTable.id, "textBlink", "true")
-		else
-			return send(textTable.id, "textBlink", "false")
-		end
-	end
-	textTable.getSize = function()
-		send(textTable.id, "textGetSize", "nil")
-		local pType, message = awaitResponse(textTable.id, 2)
-		if pType and pType == "textInfo" then
-			local x, y = string.match(message, "(%d+),(%d+)")
-			return tonumber(x), tonumber(y)
-		end
-	end
-	textTable.scroll = function(lines)
-		return send(textTable.id, "textScroll", lines)
-	end
-	textTable.isColor = function()
-		send(textTable.id, "textIsColor", "nil")
-		local pType, message = awaitResponse(textTable.id, 2)
-		if pType and pType == "textInfo" then
-			if message == "true" then
-				return true
+local function processText(serverNum, pType, value)
+	if pType == "textTable" then
+		local linesTable = textutils.unserialize(value)
+		for i=1, linesTable.sizeY do
+			term.setCursorPos(1,i)
+			local lineEnd = false
+			local offset = 1
+			while not lineEnd do
+				local textColorString = string.match(string.sub(linesTable.textColor[i], offset), string.sub(linesTable.textColor[i], offset, offset).."*")
+				local backColorString = string.match(string.sub(linesTable.backColor[i], offset), string.sub(linesTable.backColor[i], offset, offset).."*")
+				term.setTextColor(2 ^ tonumber(string.sub(textColorString, 1, 1), 16))
+				term.setBackgroundColor(2 ^ tonumber(string.sub(backColorString, 1, 1), 16))
+				term.write(string.sub(linesTable.text[i], offset, offset + math.min(#textColorString, #backColorString) - 1))
+				offset = offset + math.min(#textColorString, #backColorString)
+				if offset > linesTable.sizeX then lineEnd = true end
 			end
 		end
-		return false
+		term.setCursorPos(linesTable.cursorX, linesTable.cursorY)
+		term.setCursorBlink(linesTable.cursorBlink)
 	end
-	textTable.isColour = textTable.isColor
-	textTable.setTextColor = function(color)
-		return send(textTable.id, "textColor", tostring(color))
-	end
-	textTable.setTextColour = textTable.setTextColor
-	textTable.setBackgroundColor = function(color)
-		return send(textTable.id, "textBackground", tostring(color))
-	end
-	textTable.setBackgroundColour = textTable.setBackgroundColor
-	return textTable
 end
+
 
 local eventFilter = {
 	key = true,
@@ -261,11 +227,17 @@ local eventFilter = {
 	mouse_scroll = true,
 }
 
-local function newSession()
+local function newSession(x, y, color)
+	local session = {}
 	local path = "/rom/programs/shell"
 	if #tArgs >= 2 and shell.resolveProgram(tArgs[2]) then path = shell.resolveProgram(tArgs[2]) end
-	local sessionThread = coroutine.create(function() shell.run(path) end)
-	return sessionThread
+	session.thread = coroutine.create(function() shell.run(path) end)
+	session.target = framebuffer.new(x, y, color)
+	session.status = "open"
+	term.redirect(session.target)
+	coroutine.resume(session.thread)
+	term.restore()
+	return session
 end
 
 if #tArgs >= 1 and tArgs[1] == "host" then
@@ -310,16 +282,22 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 								table.remove(connections, conn)
 							end
 							term.restore()
+							if connections[conn] then
+								send(conn, "textTable", textutils.serialize(connections[conn].target.buffer))
+							end
 						end
 					elseif packetType == "query" then
-						--reset connection
-						connections[conn].status = "open"
-						connections[conn].target = textRedirect(conn)
-						connections[conn].thread = newSession()
-						send(conn, "response", "OK")
-						term.redirect(connections[conn].target)
-						coroutine.resume(connections[conn].thread)
-						term.restore()
+						local connType, color, x, y = string.match(message, "(%a+):(%a+);(%d+),(%d+)")
+						if connType == "connect" then
+							--reset connection
+							send(conn, "response", "OK")
+							connections[conn] = newSession(tonumber(x), tonumber(y), color == "true")
+							send(conn, "textTable", textutils.serialize(connections[conn].target.buffer))
+						elseif connType == "resume" then
+							--restore connection
+							send(conn, "response", "OK")
+							send(conn, "textTable", textutils.serialize(connections[conn].target.buffer))
+						end
 					elseif packetType == "close" then
 						table.remove(connections, conn)
 						send(conn, "close", "disconnect")
@@ -338,6 +316,7 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 								table.remove(connections, conn)
 							end
 							term.restore()
+							send(conn, "textTable", textutils.serialize(connections[conn].target.buffer))
 						end
 					end
 				elseif packetType ~= "query" then
@@ -351,19 +330,18 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 								cInfo.filter = passback[2]
 							end
 							term.restore()
+							if cNum ~= "localShell" then
+								send(cNum, "textTable", textutils.serialize(cInfo.target.buffer))
+							end
 						end
 					end
 				else
 					--open new connection
-					local connInfo = {}
-					connInfo.status = "open"
-					connInfo.target = textRedirect(conn)
-					connInfo.thread = newSession()
 					send(conn, "response", "OK")
+					local color, x, y = string.match(message, "connect:(%a+);(%d+),(%d+)")
+					local connInfo = newSession(tonumber(x), tonumber(y), color == "true")
+					send(conn, "textTable", textutils.serialize(connInfo.target.buffer))
 					connections[conn] = connInfo
-					term.redirect(connInfo.target)
-					coroutine.resume(connInfo.thread)
-					term.restore()
 				end
 			else
 				--rednet message, but not in the correct format, so pass to all shells.
@@ -376,6 +354,9 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 							cInfo.filter = passback[2]
 						end
 						term.restore()
+					end
+					if cNum ~= "localShell" then
+						send(cNum, "textTable", textutils.serialize(cInfo.target.buffer))
 					end
 				end
 			end
@@ -404,12 +385,15 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 						cInfo.filter = passback[2]
 					end
 					term.restore()
+					if cNum ~= "localShell" then
+						send(cNum, "textTable", textutils.serialize(cInfo.target.buffer))
+					end
 				end
 			end
 		end
 	end
 
-elseif #tArgs == 1 and nsh and nsh.getRemoteID() then
+elseif #tArgs <= 2 and nsh and nsh.getRemoteID() then
 	print(nsh.getRemoteID())
 	--forwarding mode
 	local conns = nsh.getRemoteConnections()
@@ -450,7 +434,7 @@ elseif #tArgs == 1 and nsh and nsh.getRemoteID() then
 	term.setCursorPos(1, 1)
 	print("Connection closed by server")
 
-elseif #tArgs == 1 then --either no server running or we are the local shell on the server.
+elseif #tArgs <= 2 then --either no server running or we are the local shell on the server.
 	local serverNum = tonumber(tArgs[1])
 	if nsh then
 		local conns = nsh.getRemoteConnections()
@@ -463,23 +447,44 @@ elseif #tArgs == 1 then --either no server running or we are the local shell on 
 	end
 	local fileTransferState = nil
 	local fileData = nil
+	local fileBinaryData = nil
+	local unpackCo = {}
 	if not openModem() then return end
-	send(serverNum, "query", "connect")
-	local pType, message = awaitResponse(serverNum, 2)
-	if pType ~= "response" then
-		print("Connection failed.")
-		return
+	local color = term.isColor()
+	local x, y = term.getSize()
+	if tArgs[2] == "resume" then
+		send(serverNum, "query", "resume:"..tostring(color)..";"..tostring(x)..","..tostring(y))
 	else
-		if nsh then nshAPI = nsh end
-		if nshAPI.connList and nshAPI.connList.localShell then nshAPI.connList.localShell.outbound = serverNum end
-		nshAPI.serverNum = serverNum
-		nshAPI.clientCapabilities = "-fileTransfer-extensions-"
-		term.clear()
-		term.setCursorPos(1,1)
+		send(serverNum, "query", "connect:"..tostring(color)..";"..tostring(x)..","..tostring(y))
+	end
+	local timeout = os.startTimer(2)
+	while true do
+		local event = {os.pullEvent()}
+		if event[1] == "timer" and event[2] == timeout then
+			print("Connection failed.")
+			return
+		elseif event[1] == "rednet_message" and event[2] == serverNum and string.sub(event[3], 1, 2) == "SR" then
+			if nsh then nshAPI = nsh end
+			if nshAPI.connList and nshAPI.connList.localShell then nshAPI.connList.localShell.outbound = serverNum end
+			nshAPI.serverNum = serverNum
+			nshAPI.clientCapabilities = "-fileTransfer-extensions-"
+			term.clear()
+			term.setCursorPos(1,1)
+			break
+		end
 	end
 
 	while true do
 		event = {os.pullEventRaw()}
+		if #unpackCo > 0 then
+			for i = #unpackCo, 1, -1 do
+				if coroutine.status(unpackCo[i]) ~= "dead" then
+					coroutine.resume(unpackCo[i], unpack(event))
+				else
+					table.remove(unpackCo, i)
+				end
+			end
+		end
 		if event[1] == "rednet_message" and event[2] == serverNum then
 			if packetConversion[string.sub(event[3], 1, 2)] then
 				packetType = packetConversion[string.sub(event[3], 1, 2)]
@@ -492,12 +497,18 @@ elseif #tArgs == 1 then --either no server running or we are the local shell on 
 					end
 				elseif packetType == "fileQuery" then
 					--send a file to the server
-					if fs.exists(message) then
-						send(serverNum, "fileHeader", message)
-						local file = io.open(message, "r")
-						if file then
-							send(serverNum, "fileData", file:read("*a"))
-							file:close()
+					local mode, file = string.match(message, "^(%a)=(.*)")
+					if fs.exists(file) then
+						send(serverNum, "fileHeader", file)
+						if mode == "b" then
+							local fileString = nshAPI.packFile(file)
+							send(serverNum, "fileData", "b="..fileString)
+						else
+							local handle = io.open(file, "r")
+							if handle then
+								send(serverNum, "fileData", "t="..handle:read("*a"))
+								handle:close()
+							end
 						end
 					else
 						send(serverNum, "fileHeader", "fileNotFound")
@@ -505,10 +516,17 @@ elseif #tArgs == 1 then --either no server running or we are the local shell on 
 					send(serverNum, "fileEnd", "end")
 				elseif packetType == "fileSend" then
 					--receive a file from the server, but don't overwrite existing files.
-					if not fs.exists(message) then
-						fileTransferState = "receive_wait:"..message
+					local mode, file = string.match(message, "^(%a)=(.*)")
+					if not fs.exists(file) then
+						fileTransferState = "receive_wait:"..file
 						send(serverNum, "fileResponse", "ok")
-						fileData = ""
+						if mode == "b" then
+							fileBinaryData = ""
+							fileData = nil
+						else
+							fileData = ""
+							fileBinaryData = nil
+						end
 					else
 						send(serverNum, "fileResponse", "reject")
 					end
@@ -518,14 +536,26 @@ elseif #tArgs == 1 then --either no server running or we are the local shell on 
 					end
 				elseif packetType == "fileData" then
 					if fileTransferState and string.match(fileTransferState, "(.-):") == "receive_wait" then
-						fileData = fileData..message
+						if string.match(message, "^(%a)=") == "b" then
+							fileBinaryData = fileBinaryData..string.match(message, "^b=(.*)")
+						else
+							fileData = fileData..string.match(message, "^t=(.*)")
+						end
 					end
 				elseif packetType == "fileEnd" then
 					if fileTransferState and string.match(fileTransferState, "(.-):") == "receive_wait" then
-						local file = io.open(string.match(fileTransferState, ":(.*)"), "w")
-						if file then
-							file:write(fileData)
-							file:close()
+						if fileBinaryData then
+							local co = coroutine.create(nshAPI.unpackAndSaveFile)
+							coroutine.resume(co, string.match(fileTransferState, ":(.*)"), fileBinaryData)
+							if coroutine.status(co) ~= "dead" then
+								table.insert(unpackCo, co)
+							end
+						elseif fileData then
+							local handle = io.open(string.match(fileTransferState, ":(.*)"), "w")
+							if handle then
+								handle:write(fileData)
+								handle:close()
+							end
 						end
 						fileTransferState = nil
 					end
@@ -548,6 +578,9 @@ elseif #tArgs == 1 then --either no server running or we are the local shell on 
 		elseif event[1] == "terminate" then
 			nshAPI.serverNum = nil
 			if nshAPI.localShell then nshAPI.localShell.outbound = nil end
+			term.clear()
+			term.setCursorPos(1, 1)
+			print("Connection closed locally.")
 			return
 		end
 	end
