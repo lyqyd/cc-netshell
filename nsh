@@ -342,6 +342,30 @@ local function textRedirect(id)
 	return textTable
 end
 
+local function resumeThread(conn, event)
+	local cInfo = connections[conn]
+	if not connections[conn].filter or event[1] == connections[conn].filter then
+		connections[conn].filter = nil
+		local _oldTerm = term.redirect(connections[conn].target)
+		local passback = {coroutine.resume(connections[conn].thread, unpack(event))}
+		if passback[1] and passback[2] then
+			connections[conn].filter = passback[2]
+		end
+		if coroutine.status(connections[conn].thread) == "dead" then
+			send(conn, "close", "disconnect")
+			connections[conn] = nil
+		end
+		if _oldTerm then
+			term.redirect(_oldTerm)
+		else
+			term.restore()
+		end
+		if connections[conn] and conn ~= "localShell" and framebuffer then
+			send(conn, "textTable", textutils.serialize(connections[conn].target.buffer))
+		end
+	end
+end
+
 local eventFilter = {
 	key = true,
 	char = true,
@@ -361,9 +385,13 @@ local function newSession(conn, x, y, color)
 		session.target = textRedirect(conn)
 	end
 	session.status = "open"
-	term.redirect(session.target)
+	_oldTerm = term.redirect(session.target)
 	coroutine.resume(session.thread)
-	term.restore()
+	if _oldTerm then
+		term.redirect(_oldTerm)
+	else
+		term.restore()
+	end
 	if framebuffer then
 		send(conn, "textTable", textutils.serialize(session.target.buffer))
 	end
@@ -374,7 +402,7 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 	_G.nsh = nshAPI
 	if not openModem() then return end
 	local connInfo = {}
-	connInfo.target = term.native
+	connInfo.target = term.current and term.current() or term.native
 	local path = "/rom/programs/shell"
 	if #tArgs >= 3 and shell.resolveProgram(tArgs[3]) then path = shell.resolveProgram(tArgs[3]) end
 	connInfo.thread = coroutine.create(function() shell.run(path) end)
@@ -400,22 +428,7 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 							--we can pass the packet in raw, since this is not an event packet.
 							eventTable = event
 						end
-						if not connections[conn].filter or eventTable[1] == connections[conn].filter then
-							connections[conn].filter = nil
-							term.redirect(connections[conn].target)
-							passback = {coroutine.resume(connections[conn].thread, unpack(eventTable))}
-							if passback[1] and passback[2] then
-								connections[conn].filter = passback[2]
-							end
-							if coroutine.status(connections[conn].thread) == "dead" then
-								send(conn, "close", "disconnect")
-								table.remove(connections, conn)
-							end
-							term.restore()
-							if connections[conn] and framebuffer then
-								send(conn, "textTable", textutils.serialize(connections[conn].target.buffer))
-							end
-						end
+						resumeThread(conn, eventTable)
 					elseif packetType == "query" then
 						local connType, color, x, y = string.match(message, "(%a+):(%a+);(%d+),(%d+)")
 						if connType == "connect" or (connType == "resume" and (not framebuffer)) then
@@ -428,43 +441,17 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 							send(conn, "textTable", textutils.serialize(connections[conn].target.buffer))
 						end
 					elseif packetType == "close" then
-						table.remove(connections, conn)
+						connections[conn] = nil
 						send(conn, "close", "disconnect")
 						--close connection
 					else
 						--we got a packet, have an open connection, but despite it being in the conversion table, don't handle it ourselves. Send it onward.
-						if not connections[conn].filter or eventTable[1] == connections[conn].filter then
-							connections[conn].filter = nil
-							term.redirect(connections[conn].target)
-							passback = {coroutine.resume(connections[conn].thread, unpack(event))}
-							if passback[2] then
-								connections[conn].filter = passback[2]
-							end
-							if coroutine.status(connections[conn].thread) == "dead" then
-								send(conn, "close", "disconnect")
-								table.remove(connections, conn)
-							end
-							term.restore()
-							if framebuffer then
-								send(conn, "textTable", textutils.serialize(connections[conn].target.buffer))
-							end
-						end
+						resumeThread(conn, event)
 					end
 				elseif packetType ~= "query" then
 					--usually, we would send a disconnect here, but this prevents one from hosting nsh and connecting to other computers.  Pass these to all shells as well.
 					for cNum, cInfo in pairs(connections) do
-						if not cInfo.filter or event[1] == cInfo.filter then
-							cInfo.filter = nil
-							term.redirect(cInfo.target)
-							passback = {coroutine.resume(cInfo.thread, unpack(event))}
-							if passback[2] then
-								cInfo.filter = passback[2]
-							end
-							term.restore()
-							if cNum ~= "localShell" and framebuffer then
-								send(cNum, "textTable", textutils.serialize(cInfo.target.buffer))
-							end
-						end
+						resumeThread(cNum, event)
 					end
 				else
 					--open new connection
@@ -475,22 +462,9 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 				end
 			else
 				--rednet message, but not in the correct format, so pass to all shells.
-				for cNum, cInfo in pairs(connections) do
-					if not cInfo.filter or event[1] == cInfo.filter then
-						cInfo.filter = nil
-						term.redirect(cInfo.target)
-						passback = {coroutine.resume(cInfo.thread, unpack(event))}
-						if passback[2] then
-							cInfo.filter = passback[2]
-						end
-						term.restore()
-					end
-					if cNum ~= "localShell" and framebuffer then
-						send(cNum, "textTable", textutils.serialize(cInfo.target.buffer))
-					end
-				end
+				resumeThread(cNum, event)
 			end
-		elseif event[1] == "mouse_click" or event[1] == "mouse_drag" or event[1] == "mouse_scroll" or event[1] == "key" or event[1] == "char" then
+		elseif eventFilter[event[1]] then
 			--user interaction.
 			coroutine.resume(connections.localShell.thread, unpack(event))
 			if coroutine.status(connections.localShell.thread) == "dead" then
@@ -501,24 +475,10 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 				end
 				return
 			end
-		elseif event[1] == "terminate" then
-			_G.nsh = nil
-			return
 		else
 			--dispatch all other events to all shells
 			for cNum, cInfo in pairs(connections) do
-				if not cInfo.filter or event[1] == cInfo.filter then
-					cInfo.filter = nil
-					term.redirect(cInfo.target)
-					passback = {coroutine.resume(cInfo.thread, unpack(event))}
-					if passback[2] then
-						cInfo.filter = passback[2]
-					end
-					term.restore()
-					if cNum ~= "localShell" and framebuffer then
-						send(cNum, "textTable", textutils.serialize(cInfo.target.buffer))
-					end
-				end
+				resumeThread(cNum, event)
 			end
 		end
 	end
