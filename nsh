@@ -1,4 +1,4 @@
-local tArgs = { ... }
+local args = { ... }
 
 local connections = {}
 
@@ -7,6 +7,27 @@ local nshAPI = {
 }
 
 if not framebuffer then if not (os.loadAPI("framebuffer") or os.loadAPI("LyqydOS/framebuffer")) then print("Couldn't find framebuffer API, using fallback") end end
+
+local function rawSend(id, msg)
+	if term.current then
+		return rednet.send(id, msg, "tror")
+	else
+		return rednet.send(id, msg)
+	end
+end
+
+local function rawRecv(id, timeout)
+	if type(timeout) == "number" then timeout = os.startTimer(timeout) end
+	while true do
+		event = {os.pullEvent()}
+		if event[1] == "rednet_message" and (id == nil and true or event[2] == id) and (not term.current and true or event[4] == "tror") then
+			return event[3]
+		elseif event[1] == "timer" and event[2] == timeout then
+			return nil
+		end
+	end
+end
+
 
 nshAPI.getRemoteID = function()
 	--check for connected clients with matching threads.
@@ -31,21 +52,13 @@ end
 nshAPI.send = function(msg)
 	local id = nshAPI.getRemoteID()
 	if id then
-		return rednet.send(id, msg)
+		return rawSend(id, msg)
 	end
 	return nil
 end
 
 nshAPI.receive = function(timeout)
-	if type(timeout) == number then timeout = os.startTimer(timeout) end
-	while true do
-		event = {os.pullEvent()}
-		if event[1] == "rednet_message" and event[2] == nshAPI.getRemoteID() then
-			return event[3]
-		elseif event[1] == "timer" and event[2] == timeout then
-			return nil
-		end
-	end
+	return rawRecv(nshAPI.getRemoteID(), timeout)
 end
 
 nshAPI.getClientCapabilities = function()
@@ -195,7 +208,7 @@ end
 
 local function send(id, pType, message)
 	if pType and message then
-		return rednet.send(id, packetConversion[pType]..":;"..message)
+		return rawSend(id, packetConversion[pType]..":;"..message)
 	end
 end
 
@@ -342,6 +355,14 @@ local function textRedirect(id)
 	return textTable
 end
 
+local function getServerID(server)
+	if tonumber(server) then
+		return tonumber(server)
+	elseif term.current then
+		return rednet.lookup("tror", args[1])
+	end
+end
+
 local function resumeThread(conn, event)
 	local cInfo = connections[conn]
 	if not connections[conn].filter or event[1] == connections[conn].filter then
@@ -377,7 +398,7 @@ local eventFilter = {
 local function newSession(conn, x, y, color)
 	local session = {}
 	local path = "/rom/programs/shell"
-	if #tArgs >= 2 and shell.resolveProgram(tArgs[2]) then path = shell.resolveProgram(tArgs[2]) end
+	if #args >= 2 and shell.resolveProgram(args[2]) then path = shell.resolveProgram(args[2]) end
 	session.thread = coroutine.create(function() shell.run(path) end)
 	if framebuffer then
 		session.target = framebuffer.new(x, y, color)
@@ -398,13 +419,23 @@ local function newSession(conn, x, y, color)
 	return session
 end
 
-if #tArgs >= 1 and tArgs[1] == "host" then
+if #args >= 1 and args[1] == "host" then
 	_G.nsh = nshAPI
 	if not openModem() then return end
+	if term.current then
+		if args[4] then
+			rednet.host("tror", args[4])
+		elseif os.getComputerLabel() then
+			rednet.host("tror", os.getComputerLabel())
+		else
+			print("No label or hostname provided!")
+			return
+		end
+	end
 	local connInfo = {}
 	connInfo.target = term.current and term.current() or term.native
 	local path = "/rom/programs/shell"
-	if #tArgs >= 3 and shell.resolveProgram(tArgs[3]) then path = shell.resolveProgram(tArgs[3]) end
+	if #args >= 3 and shell.resolveProgram(args[3]) then path = shell.resolveProgram(args[3]) end
 	connInfo.thread = coroutine.create(function() shell.run(path) end)
 	connections.localShell = connInfo
 	term.clear()
@@ -414,7 +445,7 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 	while true do
 		event = {os.pullEventRaw()}
 		if event[1] == "rednet_message" then
-			if packetConversion[string.sub(event[3], 1, 2)] then
+			if type(event[3]) == "string" and packetConversion[string.sub(event[3], 1, 2)] then
 				--this is a packet meant for us.
 				conn = event[2]
 				packetType = packetConversion[string.sub(event[3], 1, 2)]
@@ -462,7 +493,9 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 				end
 			else
 				--rednet message, but not in the correct format, so pass to all shells.
-				resumeThread(cNum, event)
+				for cNum, cInfo in pairs(connections) do
+					resumeThread(cNum, event)
+				end
 			end
 		elseif eventFilter[event[1]] then
 			--user interaction.
@@ -483,7 +516,7 @@ if #tArgs >= 1 and tArgs[1] == "host" then
 		end
 	end
 
-elseif #tArgs <= 2 and nsh and nsh.getRemoteID() then
+elseif #args <= 2 and nsh and nsh.getRemoteID() then
 	print(nsh.getRemoteID())
 	--forwarding mode
 	local conns = nsh.getRemoteConnections()
@@ -495,7 +528,11 @@ elseif #tArgs <= 2 and nsh and nsh.getRemoteID() then
 	end
 	local fileTransferState = nil
 	local fileData = nil
-	local serverNum = tonumber(tArgs[1])
+	local serverNum = getServerID(args[1])
+	if not serverNum then
+		print("Server Not Found")
+		return
+	end
 	send(serverNum, "query", "connect")
 	local pType, message = awaitResponse(serverNum, 2)
 	if pType ~= "response" then
@@ -507,7 +544,7 @@ elseif #tArgs <= 2 and nsh and nsh.getRemoteID() then
 		term.setCursorPos(1,1)
 	end
 	local clientID = nsh.getRemoteID()
-	local serverID = tonumber(tArgs[1])
+	local serverID = tonumber(args[1])
 	while true do
 		event = {os.pullEvent()}
 		if event[1] == "rednet_message" then
@@ -524,8 +561,13 @@ elseif #tArgs <= 2 and nsh and nsh.getRemoteID() then
 	term.setCursorPos(1, 1)
 	print("Connection closed by server")
 
-elseif #tArgs <= 2 then --either no server running or we are the local shell on the server.
-	local serverNum = tonumber(tArgs[1])
+elseif #args <= 2 then --either no server running or we are the local shell on the server.
+	if not openModem() then return end
+	local serverNum = getServerID(args[1])
+	if not serverNum then
+		print("Server Not Found")
+		return
+	end
 	if nsh then
 		local conns = nsh.getRemoteConnections()
 		for i = 1, #conns do
@@ -539,10 +581,9 @@ elseif #tArgs <= 2 then --either no server running or we are the local shell on 
 	local fileData = nil
 	local fileBinaryData = nil
 	local unpackCo = {}
-	if not openModem() then return end
 	local color = term.isColor()
 	local x, y = term.getSize()
-	if tArgs[2] == "resume" then
+	if args[2] == "resume" then
 		send(serverNum, "query", "resume:"..tostring(color)..";"..tostring(x)..","..tostring(y))
 	else
 		send(serverNum, "query", "connect:"..tostring(color)..";"..tostring(x)..","..tostring(y))
@@ -675,6 +716,6 @@ elseif #tArgs <= 2 then --either no server running or we are the local shell on 
 		end
 	end
 else
-	print("Usage: nsh <serverID>")
-	print("       nsh host [remote [local]]")
+	print("Usage: nsh <serverID> [resume]")
+	print("       nsh host [remote [local [name]]]")
 end
