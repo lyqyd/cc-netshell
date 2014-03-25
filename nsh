@@ -6,7 +6,7 @@ local nshAPI = {
 	connList = connections
 }
 
-if not framebuffer then if not (os.loadAPI("framebuffer") or os.loadAPI("LyqydOS/framebuffer")) then print("Couldn't find framebuffer API, using fallback") end end
+if not framebuffer then if not ((fs.exists("framebuffer") and os.loadAPI("framebuffer")) or (fs.exists("LyqydOS/framebuffer") and os.loadAPI("LyqydOS/framebuffer"))) then print("Couldn't find framebuffer API, using fallback") end end
 
 local function rawSend(id, msg)
 	if term.current then
@@ -561,7 +561,7 @@ elseif #args <= 2 and nsh and nsh.getRemoteID() then
 	term.setCursorPos(1, 1)
 	print("Connection closed by server")
 
-elseif #args <= 2 then --either no server running or we are the local shell on the server.
+elseif #args >= 1 then --either no server running or we are the local shell on the server.
 	if not openModem() then return end
 	local serverNum = getServerID(args[1])
 	if not serverNum then
