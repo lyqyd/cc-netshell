@@ -6,7 +6,18 @@ local nshAPI = {
 	connList = connections
 }
 
-if not framebuffer then if not ((fs.exists("framebuffer") and os.loadAPI("framebuffer")) or (fs.exists("LyqydOS/framebuffer") and os.loadAPI("LyqydOS/framebuffer"))) then print("Couldn't find framebuffer API, using fallback") end end
+local bufferDirs = {"/","/LyqydOS/","/usr/apis/","/disk/"}
+
+if not framebuffer then
+	for i = 1, #bufferDirs do
+		if fs.exists(bufferDirs[i].."framebuffer") and os.loadAPI(bufferDirs[i].."framebuffer") then
+			break
+		end
+	end
+end
+if not framebuffer then
+	print("Couldn't find framebuffer API, using fallback")
+end
 
 local function rawSend(id, msg)
 	if term.current then
