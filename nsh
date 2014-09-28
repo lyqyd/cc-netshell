@@ -394,6 +394,7 @@ local function resumeThread(conn, event)
 		end
 		if connections[conn] and conn ~= "localShell" and framebuffer and connections[conn].target.changed then
 			send(conn, "textTable", textutils.serialize(connections[conn].target.buffer))
+			connections[conn].target.changed = false
 		end
 	end
 end
@@ -412,7 +413,19 @@ local function newSession(conn, x, y, color)
 	if #args >= 2 and shell.resolveProgram(args[2]) then path = shell.resolveProgram(args[2]) end
 	session.thread = coroutine.create(function() shell.run(path) end)
 	if framebuffer then
-		session.target = framebuffer.new(x, y, color)
+		local target = {}
+		local _target = framebuffer.new(x, y, color)
+		for k, v in pairs(_target) do
+			if type(k) == "string" and type(v) == "function" then
+				target[k] = function(...)
+					target.changed = true
+					return _target[k](...)
+				end
+			else
+				target[k] = _target[k]
+			end
+		end
+		session.target = target
 	else
 		session.target = textRedirect(conn)
 	end
@@ -426,6 +439,7 @@ local function newSession(conn, x, y, color)
 	end
 	if framebuffer then
 		send(conn, "textTable", textutils.serialize(session.target.buffer))
+		session.target.changed = false
 	end
 	return session
 end
