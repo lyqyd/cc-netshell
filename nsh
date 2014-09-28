@@ -376,7 +376,7 @@ end
 
 local function resumeThread(conn, event)
 	local cInfo = connections[conn]
-	if not connections[conn].filter or event[1] == connections[conn].filter then
+	if connections[conn] and (not connections[conn].filter or event[1] == connections[conn].filter) then
 		connections[conn].filter = nil
 		local _oldTerm = term.redirect(connections[conn].target)
 		local passback = {coroutine.resume(connections[conn].thread, unpack(event))}
@@ -385,14 +385,14 @@ local function resumeThread(conn, event)
 		end
 		if coroutine.status(connections[conn].thread) == "dead" then
 			send(conn, "close", "disconnect")
-			connections[conn] = nil
+			connections[conn] = false
 		end
 		if _oldTerm then
 			term.redirect(_oldTerm)
 		else
 			term.restore()
 		end
-		if connections[conn] and conn ~= "localShell" and framebuffer then
+		if connections[conn] and conn ~= "localShell" and framebuffer and connections[conn].target.changed then
 			send(conn, "textTable", textutils.serialize(connections[conn].target.buffer))
 		end
 	end
@@ -477,7 +477,7 @@ if #args >= 1 and args[1] == "host" then
 							--reset connection
 							send(conn, "response", "OK")
 							connections[conn] = newSession(conn, tonumber(x), tonumber(y), color == "true")
-						elseif connType == "resume" then
+						elseif connType == "resume" and connections[conn] and tonumber(x) == connections[conn].target.buffer.sizeX and tonumber(y) == connections[conn].target.buffer.sizeY then
 							--restore connection
 							send(conn, "response", "OK")
 							send(conn, "textTable", textutils.serialize(connections[conn].target.buffer))
