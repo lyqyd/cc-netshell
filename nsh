@@ -619,7 +619,7 @@ elseif #args >= 1 then --either no server running or we are the local shell on t
 		if event[1] == "timer" and event[2] == timeout then
 			print("Connection failed.")
 			return
-		elseif event[1] == "rednet_message" and event[2] == serverNum and string.sub(event[3], 1, 2) == "SR" then
+		elseif event[1] == "rednet_message" and event[2] == serverNum and type(event[3]) == "string" and string.sub(event[3], 1, 2) == "SR" then
 			if nsh then nshAPI = nsh end
 			if nshAPI.connList and nshAPI.connList.localShell then nshAPI.connList.localShell.outbound = serverNum end
 			nshAPI.serverNum = serverNum
@@ -641,7 +641,7 @@ elseif #args >= 1 then --either no server running or we are the local shell on t
 				end
 			end
 		end
-		if event[1] == "rednet_message" and event[2] == serverNum then
+		if event[1] == "rednet_message" and event[2] == serverNum and type(event[3]) == "string" then
 			if packetConversion[string.sub(event[3], 1, 2)] then
 				packetType = packetConversion[string.sub(event[3], 1, 2)]
 				message = string.match(event[3], ";(.*)")
