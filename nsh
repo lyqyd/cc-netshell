@@ -43,7 +43,7 @@ end
 nshAPI.getRemoteID = function()
 	--check for connected clients with matching threads.
 	for cNum, cInfo in pairs(nshAPI.connList) do
-		if cInfo.thread == coroutine.running() then
+		if cInfo and type(cInfo) == "table" and cInfo.thread == coroutine.running() then
 			if cNum == "localShell" then
 				--if we are a client running on the server, return the remote server ID.
 				if nshAPI.serverNum then
