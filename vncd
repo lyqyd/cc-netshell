@@ -31,7 +31,11 @@ end
 
 local function send(id, pType, message)
 	if pType and message then
-		return rednet.send(id, packetConversion[pType]..":;"..message)
+		if term.current then
+			return rednet.send(id, packetConversion[pType]..":;"..message, "tror")
+		else
+			return rednet.send(id, packetConversion[pType]..":;"..message)
+		end
 	end
 end
 
