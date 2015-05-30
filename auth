@@ -1,0 +1,8 @@
+local pass = "fooBarBaz"
+term.clear()
+term.setCursorPos(1,1)
+print("remote@"..(os.getComputerLabel() or os.getComputerID()))
+term.write("Login Required: ")
+if read("*") == pass then
+  shell.run("rom/programs/shell")
+end
