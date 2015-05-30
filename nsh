@@ -383,7 +383,7 @@ local function resumeThread(conn, event)
 		if passback[1] and passback[2] then
 			connections[conn].filter = passback[2]
 		end
-		if coroutine.status(connections[conn].thread) == "dead" then
+		if coroutine.status(connections[conn].thread) == "dead" and conn ~= "localShell" then
 			send(conn, "close", "disconnect")
 			connections[conn] = false
 		end
