@@ -165,6 +165,12 @@ while true do
 			--rednet message, but not in the correct format, so pass to all shells.
 			resumeThread(co, event)
 		end
+	elseif event[1] == "terminate" then
+		for cNum, cInfo in pairs(connections) do
+			send(cNum, "close", "disconnect")
+		end
+		_G.nsh = nil
+		return
 	else
 		--dispatch all other events to all shells
 		resumeThread(co, event)
