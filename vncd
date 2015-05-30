@@ -131,7 +131,7 @@ resumeThread(co, {})
 
 _G.nsh = nshAPI
 
-while true do
+while coroutine.status(co.thread) ~= "dead" do
 	event = {os.pullEventRaw()}
 	if event[1] == "rednet_message" then
 		if packetConversion[string.sub(event[3], 1, 2)] then
@@ -166,13 +166,14 @@ while true do
 			resumeThread(co, event)
 		end
 	elseif event[1] == "terminate" then
-		for cNum, cInfo in pairs(connections) do
-			send(cNum, "close", "disconnect")
-		end
-		_G.nsh = nil
-		return
+		break
 	else
 		--dispatch all other events to all shells
 		resumeThread(co, event)
 	end
 end
+
+for cNum, cInfo in pairs(connections) do
+	send(cNum, "close", "disconnect")
+end
+_G.nsh = nil
