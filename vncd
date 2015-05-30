@@ -104,7 +104,19 @@ end
 
 if not openModem() then error("No modem present!") end
 
-if not framebuffer then if not shell.resolveProgram("framebuffer") or not os.loadAPI(shell.resolveProgram("framebuffer")) then error("Could not load framebuffer API") end end
+local bufferDirs = {"/","/LyqydOS/","/usr/apis/","/disk/"}
+
+if not framebuffer then
+	for i = 1, #bufferDirs do
+		if fs.exists(bufferDirs[i].."framebuffer") and os.loadAPI(bufferDirs[i].."framebuffer") then
+			break
+		end
+	end
+end
+if not framebuffer then
+	print("Couldn't find framebuffer API!")
+	return
+end
 
 term.clear()
 term.setCursorPos(1,1)
