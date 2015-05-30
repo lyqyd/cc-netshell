@@ -2,6 +2,45 @@ local args = {...}
 
 local connections = {}
 
+local nshAPI = {
+	connList = connections
+}
+
+nshAPI.getRemoteID = function()
+	return false
+end
+
+nshAPI.send = function(msg)
+	return false
+end
+
+nshAPI.receive = function(timeout)
+	return false
+end
+
+nshAPI.getClientCapabilities = function()
+	return false
+end
+
+nshAPI.getRemoteConnections = function()
+	local remotes = {}
+	for cNum, cInfo in pairs(nshAPI.connList) do
+		table.insert(remotes, cNum)
+		if cInfo.outbound then
+			table.insert(remotes, cInfo.outbound)
+		end
+	end
+	return remotes
+end
+
+nshAPI.packFile = function(path)
+	return false
+end
+
+nshAPI.unpackAndSaveFile = function(path, data)
+	return false
+end
+
 local packetConversion = {
 	query = "SQ",
 	response = "SR",
@@ -42,7 +81,9 @@ end
 local function resumeThread(co, event)
 	if not co.filter or event[1] == co.filter then
 		co.filter = nil
+		local _old = term.redirect(co.target)
 		local passback = {coroutine.resume(co.thread, unpack(event))}
+		if _old then term.redirect(_old) else term.restore() end
 		if passback[1] and passback[2] then
 			co.filter = passback[2]
 		end
@@ -57,49 +98,26 @@ local function resumeThread(co, event)
 				send(cNum, "textTable", textutils.serialize(co.target.buffer))
 			end
 		end
+		framebuffer.draw(co.target.buffer)
 	end
 end
 
 if not openModem() then error("No modem present!") end
 
-if not framebuffer then if not os.loadAPI(shell.resolveProgram("framebuffer")) then error("Could not load framebuffer API") end end
+if not framebuffer then if not shell.resolveProgram("framebuffer") or not os.loadAPI(shell.resolveProgram("framebuffer")) then error("Could not load framebuffer API") end end
 
-local redirect, native = {}
+term.clear()
+term.setCursorPos(1,1)
+local x, y = term.getSize()
 
-if term.current then
-	--we are using cc 1.6+.
-	native = term.native()
-else
-	native = term.native
-end
-native.clear()
-native.setCursorPos(1,1)
-local x, y = native.getSize()
-
-local _redirect = framebuffer.new(x, y, native.isColor())
-for k, v in pairs(_redirect) do
-	if type(k) == "string" and type(v) == "function" then
-		redirect[k] = function(...)
-			_redirect[k](...)
-			return native[k](...)
-		end
-	else
-		redirect[k] = _redirect[k]
-	end
-end
-
-term.redirect(redirect)
-if term.current then
-	--1.6+
-	term.native = function() return redirect end
-else
-	term.native = redirect
-end
+local redirect = framebuffer.new(x, y, term.isColor())
 
 local shellRoutine = coroutine.create(function() shell.run("/rom/programs/shell", unpack(args)) end)
-coroutine.resume(shellRoutine)
-
 local co = {thread = shellRoutine, target = redirect}
+
+resumeThread(co, {})
+
+_G.nsh = nshAPI
 
 while true do
 	event = {os.pullEventRaw()}
